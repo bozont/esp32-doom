@@ -332,12 +332,3 @@ char* I_FindFile(const char* wfname, const char* ext)
 void I_SetAffinityMask(void)
 {
 }
-
-
-int access(const char *path, int atype) {
-    return 1;
-}
-
-
-
-

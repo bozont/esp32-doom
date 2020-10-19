@@ -17,11 +17,11 @@
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "esp_system.h"
 #include "driver/spi_master.h"
 #include "soc/gpio_struct.h"
 #include "driver/gpio.h"
-#include "esp_heap_alloc_caps.h"
 
 #include "sdkconfig.h"
 
@@ -302,7 +302,7 @@ void IRAM_ATTR displayTask(void *arg) {
 
 	//We're going to do a fair few transfers in parallel. Set them all up.
 	for (x=0; x<NO_SIM_TRANS; x++) {
-		dmamem[x]=pvPortMallocCaps(MEM_PER_TRANS*2, MALLOC_CAP_DMA);
+		dmamem[x]=malloc(MEM_PER_TRANS*2*sizeof(uint8_t));
 		assert(dmamem[x]);
 		memset(&trans[x], 0, sizeof(spi_transaction_t));
 		trans[x].length=MEM_PER_TRANS*2;
@@ -365,7 +365,6 @@ void IRAM_ATTR displayTask(void *arg) {
 #include    <xtensa/config/core.h>
 #include    <xtensa/corebits.h>
 #include    <xtensa/config/system.h>
-#include    <xtensa/simcall.h>
 
 void spi_lcd_wait_finish() {
 #ifndef DOUBLE_BUFFER
@@ -388,7 +387,7 @@ void spi_lcd_init() {
     dispSem=xSemaphoreCreateBinary();
     dispDoneSem=xSemaphoreCreateBinary();
 #ifdef DOUBLE_BUFFER
-	currFbPtr=pvPortMallocCaps(320*240, MALLOC_CAP_32BIT);
+    currFbPtr = malloc(320*240*sizeof(uint32_t));
 #endif
 #if CONFIG_FREERTOS_UNICORE
 	xTaskCreatePinnedToCore(&displayTask, "display", 6000, NULL, 6, NULL, 0);
