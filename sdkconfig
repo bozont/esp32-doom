@@ -73,6 +73,13 @@ CONFIG_BOOTLOADER_RESERVE_RTC_SIZE=0
 # end of Security features
 
 #
+# Example Board Configuration
+#
+# CONFIG_ESP_LYRAT_V4_3_BOARD is not set
+CONFIG_ESP_CUSTOM_BOARD=y
+# end of Example Board Configuration
+
+#
 # Serial flasher config
 #
 CONFIG_ESPTOOLPY_PORT="/dev/ttyUSB0"

@@ -37,6 +37,7 @@
 #include "i_system.h"
 
 #include "spi_lcd.h"
+#include "gamepad_uart.h"
 
 
 extern void jsInit();
@@ -59,6 +60,12 @@ void app_main()
 	if (part==0) printf("Couldn't find wad part!\n");
 
 	spi_lcd_init();
-	jsInit();
+
+	#if CONFIG_HW_PSX_ENA
+		jsInit();
+	#endif
+
+	uartGamepadInit();
+
 	xTaskCreatePinnedToCore(&doomEngineTask, "doomEngine", 22480, NULL, 5, NULL, 0);
 }
