@@ -96,41 +96,59 @@
 
 #include <sys/time.h>
 
-#define MODE_SPI 1
 #define PIN_NUM_MISO 2
 #define PIN_NUM_MOSI 15
 #define PIN_NUM_CLK  14
 #define PIN_NUM_CS   13
 
-static bool init_SD = false;
+enum wad_source_e {
+    WAD_SOURCE_INTERNALFLASH,
+    WAD_SOURCE_SDCARD
+};
 
-void Init_SD()
-{
-#if MODE_SPI == 1
-	sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-	//host.command_timeout_ms=200;
-	//host.max_freq_khz = SDMMC_FREQ_PROBING;
-    sdspi_slot_config_t slot_config = SDSPI_SLOT_CONFIG_DEFAULT();
-    slot_config.gpio_miso = PIN_NUM_MISO;
-    slot_config.gpio_mosi = PIN_NUM_MOSI;
-    slot_config.gpio_sck  = PIN_NUM_CLK;
-    slot_config.gpio_cs   = PIN_NUM_CS;
-	slot_config.dma_channel = 2;
-#else
-	sdmmc_host_t host = SDMMC_HOST_DEFAULT();
-	host.flags = SDMMC_HOST_FLAG_1BIT;
-	//host.max_freq_khz = SDMMC_FREQ_HIGHSPEED;
-	host.command_timeout_ms=500;
-	sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
-	slot_config.width = 1;
-#endif
-    esp_vfs_fat_sdmmc_mount_config_t mount_config = {
+static uint8_t WAD_source = WAD_SOURCE_INTERNALFLASH;
+
+void I_InitStorage() {
+    if(I_InitSD()) {
+        WAD_source = WAD_SOURCE_SDCARD;
+    } else {
+        /* ToDo: implement dynamic fallback if the SD fails */
+        lprintf(LO_WARN, "Falling back to internal flash as WAD source\n");
+    }
+}
+
+bool I_InitSD() {
+	lprintf(LO_INFO, "Init_SD: Initializing SD card...\n");
+	esp_err_t ret;
+	esp_vfs_fat_sdmmc_mount_config_t mount_config = {
         .format_if_mount_failed = false,
-        .max_files = 2
+        .max_files = 5,
+        .allocation_unit_size = 16 * 1024
     };
 
-	sdmmc_card_t* card;
-    esp_err_t ret = esp_vfs_fat_sdmmc_mount("/sdcard", &host, &slot_config, &mount_config, &card);
+    sdmmc_card_t* card;
+	sdmmc_host_t host = SDSPI_HOST_DEFAULT();
+	host.max_freq_khz = 20000;
+	host.slot = HSPI_HOST;
+    spi_bus_config_t bus_cfg = {
+        .mosi_io_num = PIN_NUM_MOSI,
+        .miso_io_num = PIN_NUM_MISO,
+        .sclk_io_num = PIN_NUM_CLK,
+        .quadwp_io_num = -1,
+        .quadhd_io_num = -1,
+        .max_transfer_sz = 4000,
+    };
+    ret = spi_bus_initialize(host.slot, &bus_cfg, 2);
+    if (ret != ESP_OK) {
+        lprintf(LO_INFO, "Failed to initialize bus.");
+        return false;
+    }
+
+    sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
+    slot_config.gpio_cs = PIN_NUM_CS;
+    slot_config.host_id = host.slot;
+
+    ret = esp_vfs_fat_sdspi_mount("/sdcard", &host, &slot_config, &mount_config, &card);
 
     if (ret != ESP_OK) {
         if (ret == ESP_FAIL) {
@@ -138,11 +156,11 @@ void Init_SD()
         } else {
            lprintf(LO_INFO, "Init_SD: Failed to initialize the card. %d\n", ret);
         }
-        return;
+        return false;
     }
-	lprintf(LO_INFO, "Init_SD: SD card opened.\n");
-	//sdmmc_card_print_info(stdout, card);
-	init_SD = true;
+	lprintf(LO_INFO, "Init_SD: init successful. Card info:\n");
+	sdmmc_card_print_info(stdout, card);
+	return true;
 }
 
 int realtime=0;
@@ -251,14 +269,13 @@ static const char fileName[] = "DOOM.WAD";
 
 int I_Open(const char *wad, int flags) {
 
+	lprintf(LO_INFO, "I_Open: open %s\n", wad);
+
 #ifdef WAD_SDCARD
 	char fname[12];
 	strcpy(fname, wad);
 	memcpy(fname+(strlen(fname)-4), ".WAD", 4);
 	lprintf(LO_INFO, "I_Open: Opening File: %s (as %s)\n", wad, fname);
-
-	if(init_SD == false)
-		Init_SD();
 
 	int x=0;
 	while (fds[x].file!=NULL && strcmp(fds[x].name ,fname)!=0 && x < 32)
@@ -267,7 +284,7 @@ int I_Open(const char *wad, int flags) {
 
 	if(x == 31 && fds[x].file!=NULL)
 	{
-		lprintf(LO_INFO, "I_Open: Too many hanfdles open\n");
+		lprintf(LO_INFO, "I_Open: Too many handles open\n");
 		return -1;
 	}
 
@@ -286,16 +303,11 @@ int I_Open(const char *wad, int flags) {
 	if(fds[x].file)
 	{
 		fds[x].offset=0;
-		//sprintf(fds[x].name,"%s",wad);
 		strcpy(fds[x].name, fname);
-		//struct stat fileStat;
-		//stat("/sdcard/doom1.wad", &fileStat);
-		//fds[x].size = fileStat.st_size;
-
 		fseek(fds[x].file, 0L, SEEK_END);
 		fds[x].size=ftell(fds[x].file);
 		rewind(fds[x].file);
-		lprintf(LO_INFO, "Size: %d\n", fds[x].size);
+		lprintf(LO_INFO, "File size: %d bytes (%dK)\n", fds[x].size, fds[x].size/1000);
 	} else {
 		lprintf(LO_INFO, "I_Open: open %s failed\n", fname);
 		return -1;
@@ -398,7 +410,7 @@ static int getFreeHandle() {
 			spi_flash_munmap(mmapHandle[nextHandle].handle);
 		#endif
 		mmapHandle[nextHandle].addr=NULL;
-//		printf("mmap: freeing handle %d\n", nextHandle);
+		//printf("mmap: freeing handle %d\n", nextHandle);
 	}
 	int r=nextHandle;
 	nextHandle++;
@@ -425,7 +437,7 @@ static void freeUnusedMmaps() {
 
 void *I_Mmap(void *addr, size_t length, int prot, int flags, int ifd, off_t offset) {
 #ifdef WAD_SDCARD
-	//	lprintf(LO_INFO, "I_Mmap: ifd %d, length: %d, offset: %d\n", ifd, (int)length, (int)offset);
+	//lprintf(LO_INFO, "I_Mmap: ifd %d, length: %d, offset: %d\n", ifd, (int)length, (int)offset);
 
 	int i;
 	esp_err_t err;
@@ -508,16 +520,17 @@ int I_Munmap(void *addr, size_t length) {
 		lprintf(LO_ERROR, "I_Mmap: Freeing non-mmapped address/len combo!");
 		exit(0);
 	}
-//	lprintf(LO_INFO, "I_Mmap: freeing handle %d\n", i);
+	//lprintf(LO_INFO, "I_Mmap: freeing handle %d\n", i);
 	mmapHandle[i].used--;
 	return 0;
 }
 
 void I_Read(int ifd, void* vbuf, size_t sz)
 {
+	//lprintf(LO_INFO, "I_Read: Reading %d bytes...\n", (int)sz);
+
 #ifdef WAD_SDCARD
 	int readBytes = 0;
-	//lprintf(LO_INFO, "I_Read: Reading %d bytes... ", (int)sz);
     for(int i = 0; i < 20; i++)
 	{
 		readBytes = fread(vbuf, sz, 1, fds[ifd].file);
@@ -529,7 +542,7 @@ void I_Read(int ifd, void* vbuf, size_t sz)
 		//vTaskDelay(300 / portTICK_RATE_MS);
 	}
 
-	I_Error("I_Read: Error Reading %d bytes after 20 tries", (int)sz);
+	I_Error("I_Read: Error Reading %d bytes after 20 tries\n", (int)sz);
 #else
 	uint8_t *d=I_Mmap(NULL, sz, 0, 0, ifd, fds[ifd].offset);
 	memcpy(vbuf, d, sz);

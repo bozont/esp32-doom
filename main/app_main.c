@@ -45,12 +45,14 @@ extern void jsInit();
 
 void doomEngineTask(void *pvParameters)
 {
+    I_InitStorage();
     char const *argv[]={"doom","-cout","ICWEFDA", NULL};
     doom_main(3, argv);
 }
 
 void app_main()
 {
+	/*
 	int i;
 	const esp_partition_t* part;
 	spi_flash_mmap_handle_t hdoomwad;
@@ -58,7 +60,7 @@ void app_main()
 
 	part=esp_partition_find_first(66, 6, NULL);
 	if (part==0) printf("Couldn't find wad part!\n");
-
+	*/
 	spi_lcd_init();
 
 	#if CONFIG_HW_PSX_ENA
