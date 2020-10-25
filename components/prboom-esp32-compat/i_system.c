@@ -101,6 +101,8 @@
 #define PIN_NUM_CLK  14
 #define PIN_NUM_CS   13
 
+#define SD_MODE_SDMMC
+
 enum wad_source_e {
     WAD_SOURCE_INTERNALFLASH,
     WAD_SOURCE_SDCARD
@@ -127,6 +129,16 @@ bool I_InitSD() {
     };
 
     sdmmc_card_t* card;
+#ifdef SD_MODE_SDMMC
+	sdmmc_host_t host = SDMMC_HOST_DEFAULT();
+    host.slot = SDMMC_HOST_SLOT_1;
+    host.max_freq_khz = 40000;
+
+    sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
+    slot_config.width = 1;
+
+    ret = esp_vfs_fat_sdmmc_mount("/sdcard", &host, &slot_config, &mount_config, &card);
+#else
 	sdmmc_host_t host = SDSPI_HOST_DEFAULT();
 	host.max_freq_khz = 20000;
 	host.slot = HSPI_HOST;
@@ -149,7 +161,7 @@ bool I_InitSD() {
     slot_config.host_id = host.slot;
 
     ret = esp_vfs_fat_sdspi_mount("/sdcard", &host, &slot_config, &mount_config, &card);
-
+#endif
     if (ret != ESP_OK) {
         if (ret == ESP_FAIL) {
             lprintf(LO_INFO, "Init_SD: Failed to mount filesystem.\n");
